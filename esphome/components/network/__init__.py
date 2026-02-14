@@ -105,10 +105,32 @@ def has_high_performance_networking() -> bool:
     """
     return CORE.data.get(KEY_HIGH_PERFORMANCE_NETWORKING, False)
 
+def validate_enable_ipv4(value):
+    value = cv.boolean(value)
 
-CONFIG_SCHEMA = cv.Schema(
+    # Can only compile out for ESP32 IDF without Arduino on top (latter cannot disable IP4)
+    if not CORE.is_esp32 or CORE.using_arduino:
+        if not value:
+            raise cv.Invalid(
+                "Option 'enable_ipv4' may only be false for ESP32 IDF."
+            )
+
+    return value
+
+def require_ipv4_or_ipv6(config):
+    if not config[CONF_ENABLE_IPV4] and not config[CONF_ENABLE_IPV6]:
+        raise cv.Invalid(
+            "Either enable_ipv4 or enable_ipv6 must be set."
+        )
+    return config
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
     {
-        cv.Optional(CONF_ENABLE_IPV4, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_IPV4, default=True): cv.All(
+            cv.boolean,
+            validate_enable_ipv4
+        ),
         cv.SplitDefault(
             CONF_ENABLE_IPV6,
             esp8266=False,
@@ -133,6 +155,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_MIN_IPV6_ADDR_COUNT, default=0): cv.positive_int,
         cv.Optional(CONF_ENABLE_HIGH_PERFORMANCE): cv.All(cv.boolean, cv.only_on_esp32),
     }
+    ), require_ipv4_or_ipv6
 )
 
 
@@ -206,10 +229,9 @@ async def to_code(config):
 
     # IP4
     enable_ipv4 = config.get(CONF_ENABLE_IPV4, True)
-    # Can only compile out for ESP32 IDF without Arduino on top (latter cannot disable IP4)
     if CORE.is_esp32:
         if CORE.using_arduino:
-            add_idf_sdkconfig_option("CONFIG_LWIP_IPV4", True)
+            # IDF sets CONFIG_LWIP_IPV4 by default
             cg.add_define("USE_NETWORK_IPV4", True)
         else:
             add_idf_sdkconfig_option("CONFIG_LWIP_IPV4", enable_ipv4)
